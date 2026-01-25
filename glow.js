@@ -70,12 +70,14 @@ function showWithLess(content, filename, onClose) {
     const tmpFile = path.join(os.tmpdir(), `mdview-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, rendered);
 
+    // %pt = percentage through file
     const less = spawn('less', [
-        '-R',           // Raw control chars (colors)
-        '-i',           // Case insensitive search
-        '-Ps%pt%%',     // Short prompt: percentage with %
-        '-Pm%pt%%',     // Medium prompt: percentage with %
-        '-PM%pt%%',     // Long prompt: percentage with %
+        '-R',
+        '-i',
+        '-M',
+        '-Ps%pt\\%',
+        '-Pm%pt\\%',
+        '-PM%pt\\%',
         tmpFile
     ], {
         stdio: 'inherit'
