@@ -1,0 +1,27 @@
+{
+  "name": "glow2",
+  "version": "1.0.0",
+  "description": "Beautiful Markdown viewer for terminal",
+  "main": "glow.js",
+  "bin": {
+    "mdview": "./glow.js"
+  },
+  "scripts": {
+    "start": "node glow.js"
+  },
+  "keywords": [
+    "markdown",
+    "viewer",
+    "terminal",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "chalk": "^4.1.2",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0"
+  }
+}
