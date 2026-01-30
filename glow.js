@@ -5,44 +5,91 @@ const { spawn } = require('child_process');
 const { Marked } = require('marked');
 const { markedTerminal } = require('marked-terminal');
 const chalk = require('chalk');
+const os = require('os');
+const pathMod = require('path');
 
 // Force chalk colors
 chalk.level = 3;
 
-// Configure marked - compact, minimal spacing
-const marked = new Marked(
-    markedTerminal({
-        width: 100,
-        reflowText: true,
-        showSectionPrefix: false,
-        tab: 2,
-        emoji: true,
-        unescape: true,
-        // Compact styling
-        paragraph: chalk.hex('#000000'),
-        firstHeading: (text, level) => chalk.hex('#0000FF').bold('#'.repeat(level || 1) + ' ' + text),
-        heading: (text, level) => chalk.hex('#0000FF').bold('#'.repeat(level || 2) + ' ' + text),
-        strong: (text) => chalk.hex('#000000').bold(text),
-        em: chalk.hex('#000000').italic,
-        codespan: chalk.bgHex('#E0E0E0').hex('#000000'),
-        blockquote: (text) => text.split('\n').map(line => chalk.hex('#000000').dim('│ ' + line)).join('\n'),
-        code: chalk.bgHex('#E0E0E0').hex('#000000'),
-        link: chalk.hex('#000000').underline,
-        href: chalk.hex('#000000').dim,
-        hr: () => chalk.hex('#AAAAAA')('─'.repeat(60)),
-        listitem: chalk.hex('#000000'),
-        // Table
-        tableOptions: {
-            chars: {
-                'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
-                'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
-                'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
-                'right': '│', 'right-mid': '┤', 'middle': '│'
+// Theme definitions
+const THEMES = {
+    light: {
+        text: '#000000',
+        heading: '#0000FF',
+        codeBg: '#E0E0E0',
+        codeFg: '#000000',
+        hr: '#AAAAAA',
+        selectorBg: '#0000FF',
+        hint: '#AAAAAA',
+    },
+    dark: {
+        text: '#E0E0E0',
+        heading: '#5599FF',
+        codeBg: '#333333',
+        codeFg: '#E0E0E0',
+        hr: '#555555',
+        selectorBg: '#5599FF',
+        hint: '#777777',
+    },
+};
+
+const THEME_FILE = pathMod.join(os.homedir(), '.mdview-theme');
+
+function loadTheme() {
+    try {
+        const name = fs.readFileSync(THEME_FILE, 'utf8').trim();
+        if (name === 'light' || name === 'dark') return name;
+    } catch (e) { /* ignore */ }
+    return 'dark';
+}
+
+function saveTheme(name) {
+    try { fs.writeFileSync(THEME_FILE, name); } catch (e) { /* ignore */ }
+}
+
+let currentTheme = loadTheme();
+
+function createMarked(theme) {
+    return new Marked(
+        markedTerminal({
+            width: 100,
+            reflowText: true,
+            showSectionPrefix: false,
+            tab: 2,
+            emoji: true,
+            unescape: true,
+            paragraph: chalk.hex(theme.text),
+            firstHeading: (text, level) => chalk.hex(theme.heading).bold('#'.repeat(level || 1) + ' ' + text),
+            heading: (text, level) => chalk.hex(theme.heading).bold('#'.repeat(level || 2) + ' ' + text),
+            strong: (text) => chalk.hex(theme.text).bold(text),
+            em: chalk.hex(theme.text).italic,
+            codespan: chalk.bgHex(theme.codeBg).hex(theme.codeFg),
+            blockquote: (text) => text.split('\n').map(line => chalk.hex(theme.text).dim('│ ' + line)).join('\n'),
+            code: chalk.bgHex(theme.codeBg).hex(theme.codeFg),
+            link: chalk.hex(theme.text).underline,
+            href: chalk.hex(theme.text).dim,
+            hr: () => chalk.hex(theme.hr)('─'.repeat(60)),
+            listitem: chalk.hex(theme.text),
+            tableOptions: {
+                chars: {
+                    'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+                    'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+                    'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+                    'right': '│', 'right-mid': '┤', 'middle': '│'
+                },
+                style: { head: [], border: [] }
             },
-            style: { head: [], border: [] }
-        },
-    })
-);
+        })
+    );
+}
+
+let marked = createMarked(THEMES[currentTheme]);
+
+function toggleTheme() {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    saveTheme(currentTheme);
+    marked = createMarked(THEMES[currentTheme]);
+}
 
 function render(content) {
     let result = marked.parse(content);
@@ -53,21 +100,19 @@ function render(content) {
     // Convert any remaining *text* to italic
     result = result.replace(/\*([^*]+)\*/g, (_, text) => chalk.italic(text));
     // Convert any remaining `code` to grey background
-    result = result.replace(/`([^`]+)`/g, (_, text) => chalk.bgHex('#E0E0E0').hex('#000000')(text));
+    const theme = THEMES[currentTheme];
+    result = result.replace(/`([^`]+)`/g, (_, text) => chalk.bgHex(theme.codeBg).hex(theme.codeFg)(text));
     // Add left padding to each line
     result = result.split('\n').map(line => '  ' + line).join('\n');
     return result;
 }
 
 function showWithLess(content, filename, onClose, startLine) {
-    const os = require('os');
-    const path = require('path');
-
     const header = '  ' + chalk.inverse.black(` ${filename} `) + '\n\n';
     const rendered = header + render(content);
 
     // Write to temp file so less can have full terminal control
-    const tmpFile = path.join(os.tmpdir(), `mdview-${Date.now()}.txt`);
+    const tmpFile = pathMod.join(os.tmpdir(), `mdview-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, rendered);
 
     // %Pb = percentage through file by line, bottom of screen (shows 100% at end)
@@ -174,41 +219,42 @@ function showFileSelector(files) {
     let searchResults = [];
 
     const renderList = () => {
+        const t = THEMES[currentTheme];
         process.stdout.write('\x1B[2J\x1B[H');
 
         if (searchMode) {
-            console.log(chalk.hex('#0000FF').bold('\n  Search in files\n'));
-            console.log(chalk.hex('#AAAAAA')(`  / `) + chalk.white(searchQuery) + chalk.hex('#FFFFFF').bold('█') + '\n');
+            console.log(chalk.hex(t.heading).bold('\n  Search in files\n'));
+            console.log(chalk.hex(t.hint)(`  / `) + chalk.white(searchQuery) + chalk.hex('#FFFFFF').bold('█') + '\n');
 
             if (searchQuery.length > 0 && searchResults.length > 0) {
                 searchResults.forEach((result, i) => {
-                    const lineInfo = chalk.hex('#888888')(`L${result.line}`);
-                    const preview = chalk.hex('#666666')(result.preview);
+                    const lineInfo = chalk.hex(t.hint)(`L${result.line}`);
+                    const preview = chalk.hex(t.hint)(result.preview);
                     if (i === selected) {
-                        console.log(chalk.bgHex('#0000FF').hex('#FFFFFF')(`  > ${result.relPath} `) + ' ' + lineInfo);
-                        console.log(chalk.hex('#999999')(`      ${preview}`));
+                        console.log(chalk.bgHex(t.selectorBg).hex('#FFFFFF')(`  > ${result.relPath} `) + ' ' + lineInfo);
+                        console.log(chalk.hex(t.hint)(`      ${preview}`));
                     } else {
-                        console.log(chalk.hex('#000000')(`    ${result.relPath} `) + lineInfo);
-                        console.log(chalk.hex('#666666')(`      ${preview}`));
+                        console.log(chalk.hex(t.text)(`    ${result.relPath} `) + lineInfo);
+                        console.log(chalk.hex(t.hint)(`      ${preview}`));
                     }
                 });
             } else if (searchQuery.length > 0) {
-                console.log(chalk.hex('#888888')('  No matches found'));
+                console.log(chalk.hex(t.hint)('  No matches found'));
             }
-            console.log(chalk.hex('#AAAAAA')('\n  Enter:open  Esc:back  type to search'));
+            console.log(chalk.hex(t.hint)('\n  Enter:open  Esc:back  t:theme  type to search'));
             return;
         }
 
-        console.log(chalk.hex('#0000FF').bold('\n  Markdown files\n'));
+        console.log(chalk.hex(t.heading).bold('\n  Markdown files\n'));
         files.forEach((file, i) => {
             const relPath = path.relative('.', file);
             if (i === selected) {
-                console.log(chalk.bgHex('#0000FF').hex('#FFFFFF')(`  > ${relPath}  `));
+                console.log(chalk.bgHex(t.selectorBg).hex('#FFFFFF')(`  > ${relPath}  `));
             } else {
-                console.log(chalk.hex('#000000')(`    ${relPath}`));
+                console.log(chalk.hex(t.text)(`    ${relPath}`));
             }
         });
-        console.log(chalk.hex('#AAAAAA')('\n  ↑/↓ navigate  Enter select  / search  q quit'));
+        console.log(chalk.hex(t.hint)('\n  ↑/↓ navigate  Enter select  / search  t theme  q quit'));
     };
 
     const startSelector = () => {
@@ -293,6 +339,12 @@ function showFileSelector(files) {
         }
 
         // Normal mode
+        // t to toggle theme
+        if (key === 't') {
+            toggleTheme();
+            renderList();
+            return;
+        }
         // q to quit
         if (key === 'q') {
             process.stdout.write('\x1B[2J\x1B[H');

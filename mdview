@@ -5,44 +5,91 @@ const { spawn } = require('child_process');
 const { Marked } = require('marked');
 const { markedTerminal } = require('marked-terminal');
 const chalk = require('chalk');
+const os = require('os');
+const pathMod = require('path');
 
 // Force chalk colors
 chalk.level = 3;
 
-// Configure marked - compact, minimal spacing
-const marked = new Marked(
-    markedTerminal({
-        width: 100,
-        reflowText: true,
-        showSectionPrefix: false,
-        tab: 2,
-        emoji: true,
-        unescape: true,
-        // Compact styling
-        paragraph: chalk.hex('#000000'),
-        firstHeading: (text, level) => chalk.hex('#0000FF').bold('#'.repeat(level || 1) + ' ' + text),
-        heading: (text, level) => chalk.hex('#0000FF').bold('#'.repeat(level || 2) + ' ' + text),
-        strong: (text) => chalk.hex('#000000').bold(text),
-        em: chalk.hex('#000000').italic,
-        codespan: chalk.bgHex('#E0E0E0').hex('#000000'),
-        blockquote: (text) => text.split('\n').map(line => chalk.hex('#000000').dim('│ ' + line)).join('\n'),
-        code: chalk.bgHex('#E0E0E0').hex('#000000'),
-        link: chalk.hex('#000000').underline,
-        href: chalk.hex('#000000').dim,
-        hr: () => chalk.hex('#AAAAAA')('─'.repeat(60)),
-        listitem: chalk.hex('#000000'),
-        // Table
-        tableOptions: {
-            chars: {
-                'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
-                'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
-                'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
-                'right': '│', 'right-mid': '┤', 'middle': '│'
+// Theme definitions
+const THEMES = {
+    light: {
+        text: '#000000',
+        heading: '#0000FF',
+        codeBg: '#E0E0E0',
+        codeFg: '#000000',
+        hr: '#AAAAAA',
+        selectorBg: '#0000FF',
+        hint: '#AAAAAA',
+    },
+    dark: {
+        text: '#E0E0E0',
+        heading: '#5599FF',
+        codeBg: '#333333',
+        codeFg: '#E0E0E0',
+        hr: '#555555',
+        selectorBg: '#5599FF',
+        hint: '#777777',
+    },
+};
+
+const THEME_FILE = pathMod.join(os.homedir(), '.mdview-theme');
+
+function loadTheme() {
+    try {
+        const name = fs.readFileSync(THEME_FILE, 'utf8').trim();
+        if (name === 'light' || name === 'dark') return name;
+    } catch (e) { /* ignore */ }
+    return 'dark';
+}
+
+function saveTheme(name) {
+    try { fs.writeFileSync(THEME_FILE, name); } catch (e) { /* ignore */ }
+}
+
+let currentTheme = loadTheme();
+
+function createMarked(theme) {
+    return new Marked(
+        markedTerminal({
+            width: 100,
+            reflowText: true,
+            showSectionPrefix: false,
+            tab: 2,
+            emoji: true,
+            unescape: true,
+            paragraph: chalk.hex(theme.text),
+            firstHeading: (text, level) => chalk.hex(theme.heading).bold('#'.repeat(level || 1) + ' ' + text),
+            heading: (text, level) => chalk.hex(theme.heading).bold('#'.repeat(level || 2) + ' ' + text),
+            strong: (text) => chalk.hex(theme.text).bold(text),
+            em: chalk.hex(theme.text).italic,
+            codespan: chalk.bgHex(theme.codeBg).hex(theme.codeFg),
+            blockquote: (text) => text.split('\n').map(line => chalk.hex(theme.text).dim('│ ' + line)).join('\n'),
+            code: chalk.bgHex(theme.codeBg).hex(theme.codeFg),
+            link: chalk.hex(theme.text).underline,
+            href: chalk.hex(theme.text).dim,
+            hr: () => chalk.hex(theme.hr)('─'.repeat(60)),
+            listitem: chalk.hex(theme.text),
+            tableOptions: {
+                chars: {
+                    'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+                    'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+                    'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+                    'right': '│', 'right-mid': '┤', 'middle': '│'
+                },
+                style: { head: [], border: [] }
             },
-            style: { head: [], border: [] }
-        },
-    })
-);
+        })
+    );
+}
+
+let marked = createMarked(THEMES[currentTheme]);
+
+function toggleTheme() {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    saveTheme(currentTheme);
+    marked = createMarked(THEMES[currentTheme]);
+}
 
 function render(content) {
     let result = marked.parse(content);
@@ -53,34 +100,37 @@ function render(content) {
     // Convert any remaining *text* to italic
     result = result.replace(/\*([^*]+)\*/g, (_, text) => chalk.italic(text));
     // Convert any remaining `code` to grey background
-    result = result.replace(/`([^`]+)`/g, (_, text) => chalk.bgHex('#E0E0E0').hex('#000000')(text));
+    const theme = THEMES[currentTheme];
+    result = result.replace(/`([^`]+)`/g, (_, text) => chalk.bgHex(theme.codeBg).hex(theme.codeFg)(text));
     // Add left padding to each line
     result = result.split('\n').map(line => '  ' + line).join('\n');
     return result;
 }
 
-function showWithLess(content, filename, onClose) {
-    const os = require('os');
-    const path = require('path');
-
+function showWithLess(content, filename, onClose, startLine) {
     const header = '  ' + chalk.inverse.black(` ${filename} `) + '\n\n';
     const rendered = header + render(content);
 
     // Write to temp file so less can have full terminal control
-    const tmpFile = path.join(os.tmpdir(), `mdview-${Date.now()}.txt`);
+    const tmpFile = pathMod.join(os.tmpdir(), `mdview-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, rendered);
 
     // %Pb = percentage through file by line, bottom of screen (shows 100% at end)
     // \% = literal % sign in less prompt
-    const less = spawn('less', [
+    const lessArgs = [
         '-R',
         '-i',
         '-M',
-        '-Ps%Pb\\%',
-        '-Pm%Pb\\%',
-        '-PM%Pb\\%  ↑/↓:scroll  PgUp/PgDn:page  q:quit',
-        tmpFile
-    ], {
+        '-Ps%Pb\\\\%',
+        '-Pm%Pb\\\\%',
+        '-PM%Pb\\\\%  ↑/↓:scroll  PgUp/PgDn:page  q:quit',
+    ];
+    if (startLine && startLine > 1) {
+        lessArgs.push(`+${startLine}`);
+    }
+    lessArgs.push(tmpFile);
+
+    const less = spawn('less', lessArgs, {
         stdio: 'inherit'
     });
 
@@ -121,31 +171,97 @@ ${chalk.bold('Mouse:')}
 }
 
 function findMarkdownFiles(dir) {
-    const files = fs.readdirSync(dir);
-    return files.filter(f => f.endsWith('.md') || f.endsWith('.markdown'))
-                .sort();
+    const path = require('path');
+    const results = [];
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+            results.push(...findMarkdownFiles(fullPath));
+        } else if (entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.markdown'))) {
+            results.push(fullPath);
+        }
+    }
+    return results.sort();
+}
+
+function searchInFiles(files, query) {
+    const path = require('path');
+    const results = [];
+    const lowerQuery = query.toLowerCase();
+    for (const file of files) {
+        try {
+            const content = fs.readFileSync(file, 'utf8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].toLowerCase().includes(lowerQuery)) {
+                    results.push({
+                        file: file,
+                        basename: path.basename(file),
+                        relPath: path.relative('.', file),
+                        line: i + 1,
+                        preview: lines[i].trim().substring(0, 80)
+                    });
+                    break; // only first match per file
+                }
+            }
+        } catch (e) { /* skip unreadable files */ }
+    }
+    return results;
 }
 
 function showFileSelector(files) {
+    const path = require('path');
     let selected = 0;
     let inputHandler;
+    let searchMode = false;
+    let searchQuery = '';
+    let searchResults = [];
 
     const renderList = () => {
-        // Clear screen and move cursor to top
+        const t = THEMES[currentTheme];
         process.stdout.write('\x1B[2J\x1B[H');
-        console.log(chalk.hex('#0000FF').bold('\n  Markdown files\n'));
+
+        if (searchMode) {
+            console.log(chalk.hex(t.heading).bold('\n  Search in files\n'));
+            console.log(chalk.hex(t.hint)(`  / `) + chalk.white(searchQuery) + chalk.hex('#FFFFFF').bold('█') + '\n');
+
+            if (searchQuery.length > 0 && searchResults.length > 0) {
+                searchResults.forEach((result, i) => {
+                    const lineInfo = chalk.hex(t.hint)(`L${result.line}`);
+                    const preview = chalk.hex(t.hint)(result.preview);
+                    if (i === selected) {
+                        console.log(chalk.bgHex(t.selectorBg).hex('#FFFFFF')(`  > ${result.relPath} `) + ' ' + lineInfo);
+                        console.log(chalk.hex(t.hint)(`      ${preview}`));
+                    } else {
+                        console.log(chalk.hex(t.text)(`    ${result.relPath} `) + lineInfo);
+                        console.log(chalk.hex(t.hint)(`      ${preview}`));
+                    }
+                });
+            } else if (searchQuery.length > 0) {
+                console.log(chalk.hex(t.hint)('  No matches found'));
+            }
+            console.log(chalk.hex(t.hint)('\n  Enter:open  Esc:back  t:theme  type to search'));
+            return;
+        }
+
+        console.log(chalk.hex(t.heading).bold('\n  Markdown files\n'));
         files.forEach((file, i) => {
-            const basename = require('path').basename(file);
+            const relPath = path.relative('.', file);
             if (i === selected) {
-                console.log(chalk.bgHex('#0000FF').hex('#FFFFFF')(`  > ${basename}  `));
+                console.log(chalk.bgHex(t.selectorBg).hex('#FFFFFF')(`  > ${relPath}  `));
             } else {
-                console.log(chalk.hex('#000000')(`    ${basename}`));
+                console.log(chalk.hex(t.text)(`    ${relPath}`));
             }
         });
-        console.log(chalk.hex('#AAAAAA')('\n  ↑/↓ navigate  Enter select  q quit'));
+        console.log(chalk.hex(t.hint)('\n  ↑/↓ navigate  Enter select  / search  t theme  q quit'));
     };
 
     const startSelector = () => {
+        searchMode = false;
+        searchQuery = '';
+        searchResults = [];
+        selected = 0;
         renderList();
         process.stdin.setRawMode(true);
         process.stdin.resume();
@@ -154,10 +270,94 @@ function showFileSelector(files) {
     };
 
     inputHandler = (key) => {
-        // Ctrl+C or q
-        if (key === '\u0003' || key === 'q') {
+        // Ctrl+C
+        if (key === '\u0003') {
             process.stdout.write('\x1B[2J\x1B[H');
             process.exit(0);
+        }
+
+        if (searchMode) {
+            // Escape - exit search
+            if (key === '\x1B' && key.length === 1) {
+                searchMode = false;
+                searchQuery = '';
+                searchResults = [];
+                selected = 0;
+                renderList();
+                return;
+            }
+            // Backspace
+            if (key === '\x7F' || key === '\b') {
+                searchQuery = searchQuery.slice(0, -1);
+                if (searchQuery.length > 0) {
+                    searchResults = searchInFiles(files, searchQuery);
+                } else {
+                    searchResults = [];
+                }
+                selected = 0;
+                renderList();
+                return;
+            }
+            // Enter - open selected result
+            if (key === '\r' || key === '\n') {
+                if (searchResults.length > 0) {
+                    process.stdin.setRawMode(false);
+                    process.stdin.pause();
+                    process.stdin.removeAllListeners('data');
+                    process.stdout.write('\x1B[2J\x1B[H');
+                    const result = searchResults[selected];
+                    const content = fs.readFileSync(result.file, 'utf8');
+                    showWithLess(content, result.relPath, startSelector, result.line);
+                }
+                return;
+            }
+            // Up arrow
+            if (key === '\x1B[A') {
+                if (searchResults.length > 0) {
+                    selected = selected > 0 ? selected - 1 : searchResults.length - 1;
+                }
+                renderList();
+                return;
+            }
+            // Down arrow
+            if (key === '\x1B[B') {
+                if (searchResults.length > 0) {
+                    selected = selected < searchResults.length - 1 ? selected + 1 : 0;
+                }
+                renderList();
+                return;
+            }
+            // Printable character - add to search
+            if (key.length === 1 && key >= ' ') {
+                searchQuery += key;
+                searchResults = searchInFiles(files, searchQuery);
+                selected = 0;
+                renderList();
+                return;
+            }
+            return;
+        }
+
+        // Normal mode
+        // t to toggle theme
+        if (key === 't') {
+            toggleTheme();
+            renderList();
+            return;
+        }
+        // q to quit
+        if (key === 'q') {
+            process.stdout.write('\x1B[2J\x1B[H');
+            process.exit(0);
+        }
+        // / to enter search mode
+        if (key === '/') {
+            searchMode = true;
+            searchQuery = '';
+            searchResults = [];
+            selected = 0;
+            renderList();
+            return;
         }
         // Enter
         if (key === '\r' || key === '\n') {
@@ -166,8 +366,8 @@ function showFileSelector(files) {
             process.stdin.removeAllListeners('data');
             process.stdout.write('\x1B[2J\x1B[H');
             const content = fs.readFileSync(files[selected], 'utf8');
-            const basename = require('path').basename(files[selected]);
-            showWithLess(content, basename, startSelector);
+            const relPath = path.relative('.', files[selected]);
+            showWithLess(content, relPath, startSelector);
             return;
         }
         // Up arrow
@@ -218,7 +418,7 @@ async function main() {
 
     // Directory - show file selector
     if (stat.isDirectory()) {
-        const mdFiles = findMarkdownFiles(target).map(f => path.join(target, f));
+        const mdFiles = findMarkdownFiles(target);
         if (mdFiles.length === 0) {
             console.error(chalk.red(`  No markdown files found in ${target}`));
             process.exit(1);
